@@ -1,0 +1,64 @@
+.titlebar {
+	height: 31px;
+	user-select: none;
+	position: fixed;
+	top: 0;
+	left: 5px;
+	display: flex;
+	width: calc(100% - 10px);
+	z-index: 1000;
+
+	&>.grab {
+		flex-grow: 1;
+		cursor: grab;
+	}
+
+	&>.option {
+		flex-shrink: 0;
+		min-width: 31px;
+		height: 31px;
+		user-select: none;
+		-webkit-user-select: none;
+
+		&:before {
+			content: '';
+			display: block;
+			width: 100%;
+			height: 100%;
+			mask-position: center;
+			mask-repeat: no-repeat;
+			mask-size: 17px;
+			cursor: pointer;
+		}
+
+		&:hover {
+			background: #4DA3FF;
+
+			&:before {
+				background: var(--one);
+			}
+		}
+	}
+}
+
+#titlebar-minimize {
+	&:before {
+		mask-image: url('https://api.iconify.design/mdi:window-minimize.svg');
+	}
+}
+
+#titlebar-maximize {
+	&:before {
+		mask-image: url('https://api.iconify.design/mdi:window-maximize.svg');
+	}
+}
+
+#titlebar-close {
+	&:before {
+		mask-image: url('https://api.iconify.design/mdi:close.svg');
+	}
+
+	&:hover {
+		background: #ff4d4d;
+	}
+}
