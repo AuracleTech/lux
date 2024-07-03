@@ -14,7 +14,7 @@ document.getElementById("titlebar-maximize")?.addEventListener("click", () => wi
 document.getElementById("titlebar-close")?.addEventListener("click", () => win.close());
 
 import { Node, Link } from "./network_types.ts";
-import { generateGraph, genPolygon, gen3DPolygon } from "./network_generate.ts";
+import { genRandomGraph, genPolygon } from "./network_generate.ts";
 
 class NetworkCanvas extends HTMLCanvasElement {
 	private context: CanvasRenderingContext2D = this.getContext("2d") as CanvasRenderingContext2D;
@@ -26,8 +26,8 @@ class NetworkCanvas extends HTMLCanvasElement {
 	links: Link[] = [];
 
 	// rendering - general
-	private render_nodes: boolean = false;
-	private nodeRadius: number = 10;
+	private render_nodes: boolean = true;
+	private nodeRadius: number = 7;
 	private linkWidth: number = 2.68;
 	private draggedNodeColor: string = "white";
 	private render_node_labels: boolean = true;
@@ -39,43 +39,40 @@ class NetworkCanvas extends HTMLCanvasElement {
 	private gridLineWidth = 0.68;
 
 	// physics
-	private attractionForce: number = 0.168;
-	private repulsionForce: number = 500;
-	private centerAttractionForce: number = 0.01;
+	private attractionForce: number = 0.001;
+	private repulsionForce: number = 3000;
+	private centerAttractionForce: number = 0.001;
+	private forceMultiplier: number = 1;
+	private forceEpsilon = 10;
 
 	// general
 	private scale: number = 1;
 	private minScale: number = 0.1;
-	private maxScale: number = 10;
+	private maxScale: number = 50;
+
+	// time
+	private lastUpdateTime: number = 0;
+	private accumulatedTime: number = 0;
+	private fixedTimeStep: number = 1000 / 60; // Fixed time step in milliseconds (e.g., 16.67ms for 60 FPS)
 
 	constructor() {
 		super();
-		this.classList.add("network-canvas");
 	}
 
-	preventContextMenu = (event: MouseEvent) => event.preventDefault();
-
 	connectedCallback() {
-		const graph = generateGraph(1000, 1000);
-		this.nodes = this.nodes.concat(graph.nodes);
-		this.links = this.links.concat(graph.links);
+		// TEMP
+		let { nodes, links } = genRandomGraph(10, 20);
+		this.nodes = nodes;
+		this.links = links;
 
-		for (let i = 0; i <= 20; i++) {
-			const { nodes, links } = genPolygon(i);
-			this.nodes = this.nodes.concat(nodes);
-			this.links = this.links.concat(links);
-		}
-		for (let i = 4; i <= 6; i++) {
-			const { nodes, links } = gen3DPolygon(i);
-			this.nodes = this.nodes.concat(nodes);
-			this.links = this.links.concat(links);
-		}
+		this.classList.add("network-canvas");
 
 		addEventListener("resize", this.resizeAdjustCanvas.bind(this));
-		addEventListener("contextmenu", this.preventContextMenu.bind(this));
+		addEventListener("contextmenu", (event) => event.preventDefault());
 		this.addEventListener("mousedown", this.mousedown.bind(this));
 		addEventListener("mousemove", this.mousemove.bind(this));
 		this.addEventListener("wheel", this.wheel.bind(this));
+
 		this.resizeCanvas();
 		this.centerCanvas();
 
@@ -85,7 +82,7 @@ class NetworkCanvas extends HTMLCanvasElement {
 
 	disconnectedCallback() {
 		removeEventListener("resize", this.resizeAdjustCanvas.bind(this));
-		removeEventListener("contextmenu", this.preventContextMenu.bind(this));
+		removeEventListener("contextmenu", (event) => event.preventDefault());
 		this.removeEventListener("mousedown", this.mousedown.bind(this));
 		removeEventListener("mousemove", this.mousemove.bind(this));
 		this.removeEventListener("wheel", this.wheel.bind(this));
@@ -109,27 +106,32 @@ class NetworkCanvas extends HTMLCanvasElement {
 		this.render_y += (this.height - old_height) / 2;
 	}
 
-	applyForces() {
-		const epsilon = 5;
+	applyForces(deltaTime: number) {
+		const dt = deltaTime;
 
 		this.nodes.forEach((node) => (node.vx = node.vy = 0));
 
 		this.links.forEach((link) => {
-			const dx = link.target.x - link.source.x;
-			const dy = link.target.y - link.source.y;
-			const distance = Math.sqrt(dx * dx + dy * dy) + epsilon;
-			const force = this.attractionForce * distance;
+			const sourceNode = this.nodes.find(node => node.id === link.source);
+			const targetNode = this.nodes.find(node => node.id === link.target);
+
+			if (!sourceNode || !targetNode) return;
+
+			const dx = targetNode.x - sourceNode.x;
+			const dy = targetNode.y - sourceNode.y;
+			const distance = Math.sqrt(dx * dx + dy * dy) + this.forceEpsilon;
+			const force = this.attractionForce * distance * this.forceMultiplier;
 
 			const ax = force * (dx / distance);
 			const ay = force * (dy / distance);
 
-			if (!link.source.isDragging) {
-				link.source.vx += ax;
-				link.source.vy += ay;
+			if (!sourceNode.isDragging) {
+				sourceNode.vx += ax;
+				sourceNode.vy += ay;
 			}
-			if (!link.target.isDragging) {
-				link.target.vx -= ax;
-				link.target.vy -= ay;
+			if (!targetNode.isDragging) {
+				targetNode.vx -= ax;
+				targetNode.vy -= ay;
 			}
 		});
 
@@ -138,8 +140,8 @@ class NetworkCanvas extends HTMLCanvasElement {
 				if (i === j) return;
 				const dx = node.x - otherNode.x;
 				const dy = node.y - otherNode.y;
-				const distance = Math.sqrt(dx * dx + dy * dy) + epsilon;
-				const force = this.repulsionForce / (distance * distance);
+				const distance = Math.sqrt(dx * dx + dy * dy) + this.forceEpsilon;
+				const force = (this.repulsionForce / (distance * distance)) * this.forceMultiplier;
 
 				const ax = force * (dx / distance);
 				const ay = force * (dy / distance);
@@ -155,66 +157,37 @@ class NetworkCanvas extends HTMLCanvasElement {
 			if (node.isDragging) return;
 			const dx = -node.x;
 			const dy = -node.y;
-			const distance = Math.sqrt(dx * dx + dy * dy) + epsilon;
-			const force = this.centerAttractionForce * distance;
+			const distance = Math.sqrt(dx * dx + dy * dy) + this.forceEpsilon;
+			const force = this.centerAttractionForce * distance * this.forceMultiplier;
 
 			node.vx += force * (dx / distance);
 			node.vy += force * (dy / distance);
 
-			node.x += node.vx;
-			node.y += node.vy;
+			node.x += node.vx * dt;
+			node.y += node.vy * dt;
 		});
 	}
 
 	drawGrid() {
-		this.context.strokeStyle = this.gridColor;
+		this.context.strokeStyle = "transparent";
 		this.context.lineWidth = this.gridLineWidth;
+		this.context.fillStyle = this.gridColor;
 
 		const gridSize = this.gridSize;
 		const gridSizeScaled = gridSize * this.scale; // FIX modulo by 0?
 
-		// const startX = Math.floor(offsetX / gridSizeScaled) * gridSize;
-		// const startY = Math.floor(offsetY / gridSizeScaled) * gridSize;
-
-		// const amount_of_dots_x = this.width / gridSizeScaled;
-		// const amount_of_dots_y = this.height / gridSizeScaled;
-
-		// const startX = -this.render_x;
-		// const startY = -this.render_y;
-
 		const startX = Math.floor(-this.render_x / gridSizeScaled) * gridSize;
 		const startY = Math.floor(-this.render_y / gridSizeScaled) * gridSize;
-
-		// TEMP draw a red dot at start x and y for debugging
-		// this.context.fillStyle = "red";
-		// this.context.beginPath();
-		// this.context.arc(startX, startY, 5, 0, 2 * Math.PI);
-		// this.context.fill();
-		// this.context.stroke();
-
-		// -this.render_x
-		// -this.render_y
 
 		const endX = this.width / this.scale + startX + gridSize;
 		const endY = this.height / this.scale + startY + gridSize;
 
 		for (let x = startX; x < endX; x += gridSize) {
 			for (let y = startY; y < endY; y += gridSize) {
-				// Grid Dots
 				this.context.beginPath();
 				this.context.arc(x, y, 1, 0, 2 * Math.PI);
 				this.context.fill();
 				this.context.stroke();
-
-				// Grid lines
-				// this.context.beginPath();
-				// this.context.moveTo(x, startY);
-				// this.context.lineTo(x, endY);
-				// this.context.stroke();
-				// this.context.beginPath();
-				// this.context.moveTo(startX, y);
-				// this.context.lineTo(endX, y);
-				// this.context.stroke();
 			}
 		}
 	}
@@ -228,20 +201,25 @@ class NetworkCanvas extends HTMLCanvasElement {
 		this.drawGrid();
 
 		this.links.forEach((link) => {
+			const sourceNode = this.nodes.find(node => node.id === link.source);
+			const targetNode = this.nodes.find(node => node.id === link.target);
+
+			if (!sourceNode || !targetNode) return;
+
 			const gradient = this.context.createLinearGradient(
-				link.source.x,
-				link.source.y,
-				link.target.x,
-				link.target.y
+				sourceNode.x,
+				sourceNode.y,
+				targetNode.x,
+				targetNode.y
 			);
-			gradient.addColorStop(0, link.source.color);
-			gradient.addColorStop(1, link.target.color);
+			gradient.addColorStop(0, sourceNode.color);
+			gradient.addColorStop(1, targetNode.color);
 
 			this.context.lineWidth = this.linkWidth;
 			this.context.strokeStyle = gradient;
 			this.context.beginPath();
-			this.context.moveTo(link.source.x, link.source.y);
-			this.context.lineTo(link.target.x, link.target.y);
+			this.context.moveTo(sourceNode.x, sourceNode.y);
+			this.context.lineTo(targetNode.x, targetNode.y);
 			this.context.stroke();
 		});
 
@@ -268,7 +246,16 @@ class NetworkCanvas extends HTMLCanvasElement {
 	}
 
 	update_and_draw() {
-		this.applyForces();
+		const currentTime = performance.now();
+		const deltaTime = currentTime - this.lastUpdateTime;
+		this.lastUpdateTime = currentTime;
+		this.accumulatedTime += deltaTime;
+
+		while (this.accumulatedTime >= this.fixedTimeStep) {
+			this.applyForces(this.fixedTimeStep);
+			this.accumulatedTime -= this.fixedTimeStep;
+		}
+
 		this.render();
 		requestAnimationFrame(this.update_and_draw.bind(this));
 	}
@@ -327,7 +314,7 @@ class NetworkCanvas extends HTMLCanvasElement {
 			this.render_y += (this.cursor_y - down_y) * this.scale;
 		};
 		const mouseup = (event: MouseEvent) => {
-			if (event.button === 2) stop();
+			if (event.button === 2) stop(); // TODO collapse 1 line
 		};
 		const stop = () => {
 			removeEventListener("mousemove", mousemove);
@@ -359,3 +346,23 @@ customElements.define("network-canvas", NetworkCanvas, { extends: "canvas" });
 
 let networkCanvas = new NetworkCanvas();
 document.body.appendChild(networkCanvas);
+
+// TODO
+// import { once } from '@tauri-apps/api/event';
+// interface LoadedPayload {
+// 	loggedIn: boolean,
+// 	token: string;
+// }
+// const _unlisten = await once<LoadedPayload>('loaded', (event) => {
+// 	console.log(`App is loaded, loggedIn: ${event.payload.loggedIn}, token: ${event.payload.token}`);
+// });
+
+// import { invoke } from "@tauri-apps/api/core";
+// async function get_nodes() {
+// 	let json: string = await invoke("get_nodes");
+// 	let object = JSON.parse(json);
+// 	let { nodes, links } = object;
+// 	networkCanvas.nodes = nodes;
+// 	networkCanvas.links = links;
+// }
+// get_nodes();

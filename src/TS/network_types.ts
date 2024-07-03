@@ -1,5 +1,8 @@
+type id = number;
+
 export type Node = {
-	id: string;
+	id: id;
+
 	x: number;
 	y: number;
 
@@ -12,6 +15,6 @@ export type Node = {
 };
 
 export type Link = {
-	source: Node;
-	target: Node;
+	source: id;
+	target: id;
 };
